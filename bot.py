@@ -1,18 +1,16 @@
 from aiogram import Bot, Dispatcher, F, types
-from aiogram.filters import Command
-from aiogram.types import FSInputFile
-from sqlalchemy import select, exists
-from sqlalchemy.exc import NoResultFound
 from io import BytesIO
 import logging
+import asyncio
 
-from config import BOT_TOKEN, ADMIN_ID
-from database import init_db, get_db
-from db_utils import is_user_admin, is_user_exists
-from models import User, Question, Response
+from config import BOT_TOKEN
+from database.database import init_db
+
+from routers.common import router as common_router
+from routers.interview import router as interview_router
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -20,70 +18,19 @@ dp = Dispatcher()
 @dp.startup()
 async def on_startup():
     await init_db()
-    logging.info("Database connected and tables created.")
+    logging.debug("Database connected and tables created.")
 
 
-@dp.message(Command("start"))
-async def start_handler(message: types.Message):
-    async for session in get_db():
-        async with session.begin():
-            # Check if the user already exists
-            user_exists = await is_user_exists(session, message.from_user.id)
+async def main() -> None:
+    # storage = MemoryStorage()
+    dp.include_router(common_router)
+    dp.include_router(interview_router)
 
-            if not user_exists:
-                # Check if the User table is empty
-                db_not_empty = await session.execute(select(exists().where(User.id != None)))
-                is_db_empty = not db_not_empty.scalar()
+    await dp.start_polling(bot)
 
-                # If the database is empty, make the first user an admin
-                new_user = User(
-                    telegram_id=message.from_user.id,
-                    username=message.from_user.username,
-                    first_name=message.from_user.first_name,
-                    last_name=message.from_user.last_name,
-                    is_admin=is_db_empty  # Set as admin if it's the first user
-                )
-                session.add(new_user)
-            else:
-                await message.answer("You have already been registered. Feel free to use the bot.")
-            
-            # Commit the changes to save the new user
-            await session.commit()
 
-    await message.answer("Welcome! Use /help for available commands.")
-
-@dp.message(Command("help"))
-async def help_handler(message: types.Message):
-    async for session in get_db():
-        async with session.begin():
-            result = await session.execute(
-                select(User).filter_by(telegram_id=message.from_user.id, is_admin=True)
-            )
-            admin_user = result.scalar()
-
-            if admin_user:
-                admin_commands = """
-                Admin Commands:
-                /create_question <text> - Create a new question
-                /edit_question <id> <new_text> - Edit a question
-                /delete_question <id> - Delete a question
-                /add_response <question_id> <text> [send as image] - Add a response
-                /list_questions - List all questions
-                """
-                await message.answer(admin_commands)
-            else:
-                await message.answer("Use /list_questions to see questions.")
-
-# @dp.message(Command("create_question"))
-# async def create_question_handler(message: types.Message):
-#     if message.from_user.id != ADMIN_ID:
-#         return
-#     question_text = message.text.split(maxsplit=1)[1]
-#     async for session in get_db():
-#         async with session.begin():
-#             new_question = Question(question_text=question_text)
-#             session.add(new_question)
-#         await message.answer(f"Question '{question_text}' created.")
+if __name__ == "__main__":
+    asyncio.run(main())
 
 # @dp.message(content_types=['photo'])
 # async def add_response_with_image_handler(message: types.Message):
@@ -139,6 +86,3 @@ async def help_handler(message: types.Message):
 #     else:
 #         reply_text = "\n".join([f"{q.id}: {q.question_text}" for q in questions_list])
 #         await message.answer(reply_text)
-
-if __name__ == "__main__":
-    dp.run_polling(bot)

@@ -1,7 +1,7 @@
-from models import Base, User
+from database.models import Base, User
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from database import Base, get_db
+from database.database import get_db
 
 
 async def is_user_exists(session, user_id):
